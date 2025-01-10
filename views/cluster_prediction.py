@@ -7,35 +7,7 @@ from sklearn.impute import KNNImputer
 from sklearn.model_selection import train_test_split
 from sklearn.tree import DecisionTreeClassifier
 
-st.title("Cluster Prediction")
-
-#--- ORIGINAL DATA / SYSTEM DATA TO EXTRACT COLUMN TYPES ------
-
-file_path = os.path.join(os.path.dirname(__file__), "../data/DM2425_ABCDEats_DATASET.csv")
-df = pd.read_csv(file_path, sep=',')
-
-file_path_clusters = os.path.join(os.path.dirname(__file__), "../data/DM2425_ABCDEats_DATASET_w_Clusters.csv")
-df_w_clusters = pd.read_csv(file_path_clusters, sep=',', index_col='customer_id')
-
-# Set customer_id as the index 
-df = df.drop_duplicates(subset='customer_id').set_index('customer_id')
-
 # ---- FUNCTIONS ----
-
-def extract_column_info(df):
-    """
-    Extracts unique values and formats for each column in the dataset.
-    """
-    column_info = {}
-    for col in df.columns:
-        if df[col].dtype == 'object':
-            column_info[col] = df[col].dropna().unique().tolist()
-        elif np.issubdtype(df[col].dtype, np.number):
-            column_info[col] = (df[col].min(), df[col].max())
-        elif np.issubdtype(df[col].dtype, np.datetime64):
-            column_info[col] = "Date format (YYYY-MM-DD)"
-    return column_info
-
 
 # Author : https://www.kaggle.com/gemartin/load-data-reduce-memory-usage and adapted to be able to check if the column is actually a float
 #or is an error like a code being a float column - if the column has Nan it will be still a float and will give us a warning.
@@ -232,6 +204,8 @@ def prepare_data(df):
             invalid_rows.append((idx, "Your record has no orders on any day, please confirm this line."))
         elif row[dow_columns].sum() != row.filter(regex=r'^HR_\d').sum():
             invalid_rows.append((idx, "Your record's total orders in all hours and all days do not match, please confirm this line."))
+        elif row['first_order'] > row['last_order']:
+            invalid_rows.append((idx, "Your record's has first_order after last_order, please confirm this line."))
 
     # If there are invalid rows, stop the process and show warnings
     if invalid_rows:
@@ -291,36 +265,42 @@ def prepare_data(df):
         return df[outliers_manual], outliers
 
     df, outliers = apply_manual_filtering(df)
+    
+    def feature_engineering(df):
+        # Step 8: Add derived features
+        df.rename(columns=rename_dict, inplace=True)
+        cuisine_columns = [col for col in df.columns if col.startswith('CUI_')]
+        dow_columns = [col for col in df.columns if col.endswith('_Orders')]
+        hour_columns = [col for col in df.columns if col.startswith('HR_')]
 
-    # Step 8: Add derived features
-    df.rename(columns=rename_dict, inplace=True)
-    cuisine_columns = [col for col in df.columns if col.startswith('CUI_')]
-    dow_columns = [col for col in df.columns if col.endswith('_Orders')]
-    hour_columns = [col for col in df.columns if col.startswith('HR_')]
-
-    df['antiguity'] = df['last_order'].max() - df['first_order']
-    df['R_recency_days'] = df['last_order'].max() - df['last_order']
-    df['F_total_orders'] = df[dow_columns].sum(axis=1)
-    df['M_total_spend'] = df[cuisine_columns].sum(axis=1)
-    df['avg_days_btw_orders'] = df['antiguity'] / df['F_total_orders'].replace(0, 1)
-    df['avg_spend_p_order'] = df['M_total_spend'] / df['F_total_orders'].replace(0, 1)
-    df['avg_products_p_order'] = df['product_count'] / df['F_total_orders'].replace(0, 1)
-    df['cuisine_diversity'] = df[cuisine_columns].gt(0).sum(axis=1)
-    df['chain_preference_ratio'] = df['is_chain'] / df['F_total_orders'].replace(0, 1)
-    df[[f'{col}_spending_dist' for col in cuisine_columns]] = (
-        df[cuisine_columns].div(df['M_total_spend'], axis=0).fillna(0).round(2)
-    )
-    df['promo_used'] = df['last_promo'].apply(lambda x: 1 if x != 'No Promo' else 0)
-    df['weekday_avg_orders'] = df[['Mon_Orders', 'Tue_Orders', 'Wed_Orders', 'Thu_Orders', 'Fri_Orders']].mean(axis=1)
-    df['weekend_avg_orders'] = df[['Sun_Orders', 'Sat_Orders']].mean(axis=1)
-    df['breakfast_orders'] = df[['HR_5', 'HR_6', 'HR_7', 'HR_8', 'HR_9', 'HR_10']].sum(axis=1)
-    df['lunch_orders'] = df[['HR_11', 'HR_12', 'HR_13', 'HR_14']].sum(axis=1)
-    df['afternoon_snack_orders'] = df[['HR_15', 'HR_16', 'HR_17']].sum(axis=1)
-    df['dinner_orders'] = df[['HR_18', 'HR_19', 'HR_20', 'HR_21']].sum(axis=1)
-    df['late_night_orders'] = df[['HR_22', 'HR_23', 'HR_0', 'HR_1', 'HR_2', 'HR_3', 'HR_4']].sum(axis=1)
-    df['day_of_week_diversity'] = df[dow_columns].gt(0).sum(axis=1)
-    df['time_of_day_diversity'] = df[['breakfast_orders', 'lunch_orders', 'afternoon_snack_orders', 'dinner_orders', 'late_night_orders']].gt(0).sum(axis=1)
-    df['vendor_loyalty'] = df['vendor_count'] / df['F_total_orders'].replace(0, 1)
+        df['antiguity'] = df['last_order'].max() - df['first_order']
+        df['R_recency_days'] = df['last_order'].max() - df['last_order']
+        df['F_total_orders'] = df[dow_columns].sum(axis=1)
+        df['M_total_spend'] = df[cuisine_columns].sum(axis=1)
+        df['avg_days_btw_orders'] = df['antiguity'] / df['F_total_orders'].replace(0, 1)
+        df['avg_spend_p_order'] = df['M_total_spend'] / df['F_total_orders'].replace(0, 1)
+        df['avg_products_p_order'] = df['product_count'] / df['F_total_orders'].replace(0, 1)
+        df['cuisine_diversity'] = df[cuisine_columns].gt(0).sum(axis=1)
+        df['chain_preference_ratio'] = df['is_chain'] / df['F_total_orders'].replace(0, 1)
+        df[[f'{col}_spending_dist' for col in cuisine_columns]] = (
+            df[cuisine_columns].div(df['M_total_spend'], axis=0).fillna(0).round(2)
+        )
+        df['promo_used'] = df['last_promo'].apply(lambda x: 1 if x != 'No Promo' else 0)
+        df['weekday_avg_orders'] = df[['Mon_Orders', 'Tue_Orders', 'Wed_Orders', 'Thu_Orders', 'Fri_Orders']].mean(axis=1)
+        df['weekend_avg_orders'] = df[['Sun_Orders', 'Sat_Orders']].mean(axis=1)
+        df['breakfast_orders'] = df[['HR_5', 'HR_6', 'HR_7', 'HR_8', 'HR_9', 'HR_10']].sum(axis=1)
+        df['lunch_orders'] = df[['HR_11', 'HR_12', 'HR_13', 'HR_14']].sum(axis=1)
+        df['afternoon_snack_orders'] = df[['HR_15', 'HR_16', 'HR_17']].sum(axis=1)
+        df['dinner_orders'] = df[['HR_18', 'HR_19', 'HR_20', 'HR_21']].sum(axis=1)
+        df['late_night_orders'] = df[['HR_22', 'HR_23', 'HR_0', 'HR_1', 'HR_2', 'HR_3', 'HR_4']].sum(axis=1)
+        df['day_of_week_diversity'] = df[dow_columns].gt(0).sum(axis=1)
+        df['time_of_day_diversity'] = df[['breakfast_orders', 'lunch_orders', 'afternoon_snack_orders', 'dinner_orders', 'late_night_orders']].gt(0).sum(axis=1)
+        df['vendor_loyalty'] = df['vendor_count'] / df['F_total_orders'].replace(0, 1)
+        
+        return df
+    
+    df = feature_engineering(df)
+    outliers = feature_engineering(outliers)
 
     # Step 9: Final feature selection
     def apply_manual_filtering_final(df):
@@ -339,24 +319,60 @@ def prepare_data(df):
     final_df, outliers_final = apply_manual_filtering_final(df)
     outliers = pd.concat([outliers, outliers_final])
 
-    final_df['Asian_Cuisine'] = final_df[Asian_Cuisine].sum(axis=1)
-    final_df['Chinese_Cuisine'] = final_df[Chinese_Cuisine].sum(axis=1)
-    final_df['Western_Cuisine'] = final_df[Western_Cuisine].sum(axis=1)
-    final_df['Other_Cuisine'] = final_df[Other_Cuisine].sum(axis=1)
-
-    final_df['Weekdays'] = final_df[['Mon_Orders', 'Tue_Orders', 'Wed_Orders', 'Thu_Orders', 'Fri_Orders']].mean(axis=1)
-
-    scaled_df = encoder_and_scaler("standard", final_df, all_perspectives)
-    scaled_df = reduce_memory_usage(scaled_df)
-    final_df = reduce_memory_usage(final_df)
-
+    if len(final_df) > 0:
+        final_df['Asian_Cuisine'] = final_df[Asian_Cuisine].sum(axis=1)
+        final_df['Chinese_Cuisine'] = final_df[Chinese_Cuisine].sum(axis=1)
+        final_df['Western_Cuisine'] = final_df[Western_Cuisine].sum(axis=1)
+        final_df['Other_Cuisine'] = final_df[Other_Cuisine].sum(axis=1)
+        final_df['Weekdays'] = final_df[['Mon_Orders', 'Tue_Orders', 'Wed_Orders', 'Thu_Orders', 'Fri_Orders']].mean(axis=1)
+        scaled_df = encoder_and_scaler("standard", final_df, all_perspectives)
+        scaled_df = reduce_memory_usage(scaled_df)
+        final_df = reduce_memory_usage(final_df)
+    else:
+        outliers['Asian_Cuisine'] = outliers[Asian_Cuisine].sum(axis=1)
+        outliers['Chinese_Cuisine'] = outliers[Chinese_Cuisine].sum(axis=1)
+        outliers['Western_Cuisine'] = outliers[Western_Cuisine].sum(axis=1)
+        outliers['Other_Cuisine'] = outliers[Other_Cuisine].sum(axis=1)
+        outliers['Weekdays'] = outliers[['Mon_Orders', 'Tue_Orders', 'Wed_Orders', 'Thu_Orders', 'Fri_Orders']].mean(axis=1)
+        scaled_df = pd.DataFrame() 
+        outliers = reduce_memory_usage(outliers)
+    
     return scaled_df, final_df, outliers
+
+def extract_column_info(df):
+    """
+    Extracts unique values and formats for each column in the dataset.
+    Provides categorical options, numerical ranges, and date format hints.
+    """
+    column_info = {}
+    for col in df.columns:
+        # Check for categorical columns (object or small number of unique values)
+        if df[col].dtype == 'object' or df[col].nunique() < 20:
+            unique_values = df[col].dropna().unique().tolist()
+            if len(unique_values) > 0:
+                column_info[col] = unique_values
+            else:
+                column_info[col] = []  # No unique values found
+        # Check for numerical columns
+        elif np.issubdtype(df[col].dtype, np.number):
+            if not df[col].dropna().empty:
+                column_info[col] = (df[col].min(), df[col].max())
+            else:
+                column_info[col] = (None, None)  # Handle columns with no numerical values
+        # Check for datetime columns
+        elif np.issubdtype(df[col].dtype, np.datetime64):
+            column_info[col] = "Date format (YYYY-MM-DD)"
+        # Fallback for other datatypes
+        else:
+            column_info[col] = "Unsupported data type"
+    
+    return column_info
 
 
 #---- MAIN INPUT PIP ----
 
 # ---- Page Title ----
-st.title("Cluster Prediction")
+st.title("🤖 Cluster Prediction")
 
 # ---- Load Data ----
 @st.cache_data
@@ -364,39 +380,66 @@ def load_data():
     """
     Load and preprocess datasets.
     """
-    df = pd.read_csv("DM2425_ABCDEats_DATASET.csv", sep=',')
-    df_w_clusters = pd.read_csv("DM2425_ABCDEats_DATASET_w_Clusters.csv", sep=',')
+    #--- ORIGINAL DATA / SYSTEM DATA TO EXTRACT COLUMN TYPES ------
+    data_url = "https://raw.githubusercontent.com/CatarinaGN/DM_interface_design/refs/heads/main/data/DM2425_ABCDEats_DATASET.csv"
+    df = pd.read_csv(data_url, sep=',')
+    data_url_w_clusters = "https://raw.githubusercontent.com/CatarinaGN/DM_interface_design/refs/heads/main/data/DM2425_ABCDEats_DATASET_w_Clusters.csv"
+    df_w_clusters = pd.read_csv(data_url_w_clusters, sep=',', index_col='customer_id')
 
-    # Set customer_id as the index
+    # Set customer_id as the index 
     df = df.drop_duplicates(subset='customer_id').set_index('customer_id')
-    df_w_clusters = df_w_clusters.set_index('customer_id')
+
     return df, df_w_clusters
 
 df, df_w_clusters = load_data()
 
-# ---- Helper Functions ----
+# ---- Extract Column Information ----
 def extract_column_info(df):
     """
-    Extract unique values and formats for each column in the dataset.
+    Extracts unique values and formats for each column in the dataset.
+    Provides categorical options, numerical ranges, and date format hints.
     """
     column_info = {}
+
     for col in df.columns:
-        if df[col].dtype == 'object':
-            column_info[col] = df[col].dropna().unique().tolist()
+        # Check for categorical columns (object or small number of unique values)
+        if df[col].dtype == 'object': # or df[col].nunique() < 10
+            unique_values = df[col].dropna().unique().tolist()
+            if len(unique_values) > 0:
+                column_info[col] = unique_values
+            else:
+                column_info[col] = []  # No unique values found
+        # Check for numerical columns
         elif np.issubdtype(df[col].dtype, np.number):
-            column_info[col] = (df[col].min(), df[col].max())
+        
+            if col.startswith("HR_"): 
+                column_info[col] = (0, 50)
+            elif col.startswith("DOW_"):  
+                column_info[col] = (0, 50)
+            elif col.startswith("CUI_"):  
+                column_info[col] = (0, 500)
+            elif not df[col].dropna().empty:
+                column_info[col] = (df[col].min(), df[col].max())
+            else:
+                column_info[col] = (None, None)  # Handle columns with no numerical values
+        # Check for datetime columns
         elif np.issubdtype(df[col].dtype, np.datetime64):
             column_info[col] = "Date format (YYYY-MM-DD)"
-    return column_info
+        # Fallback for other datatypes
+        else:
+            column_info[col] = "Unsupported data type"
 
-# Import the `prepare_data` function (assumed stored in memory)
+    return column_info
 
 # ---- Main Application ----
 def main():
     # Extract column information for inputs
     column_info = extract_column_info(df)
+    #st.write("Loaded DataFrame:", df.head())
+    #st.write("Column Info Extracted:", column_info)
 
-    st.write("## Enter Customer Details")
+
+    st.write("### Enter Customer Details")
     input_data = {}
 
     # Create inputs dynamically based on column types
@@ -404,43 +447,78 @@ def main():
         if col not in df.columns:
             continue
         if isinstance(info, list):  # Categorical
-            input_data[col] = st.selectbox(f"{col}", [""] + info)
+            if len(info) > 0:
+                input_data[col] = st.selectbox(
+                    f"{col}",
+                    ["Select"] + info,
+                    help=f"Select a value for {col} from the dropdown."
+                )
+            else:
+                st.warning(f"No options available for {col}.")
+                input_data[col] = st.text_input(
+                    f"{col} (Enter manually)",
+                    help=f"Enter a value for {col} manually."
+                )
         elif isinstance(info, tuple):  # Numerical
             min_val, max_val = info
-            input_data[col] = st.number_input(
-                f"{col}",
-                min_value=float(min_val),
-                max_value=float(max_val),
-                value=float(min_val) if min_val is not None else 0.0,
-                step=1.0
-            )
+            if min_val is not None and max_val is not None:
+                input_data[col] = st.number_input(
+                    f"{col}",
+                    min_value=float(min_val),
+                    max_value=float(max_val),
+                    value=float(min_val),
+                    step=1.0,
+                    help=f"Enter a value between {min_val} and {max_val} for {col}."
+                )
+            else:
+                input_data[col] = st.number_input(
+                    f"{col}",
+                    value=0.0,
+                    step=1.0,
+                    help=f"Enter a numerical value for {col}."
+                )
         elif info == "Date format (YYYY-MM-DD)":  # Date
-            input_data[col] = st.date_input(f"{col}")
-        else:  # Fallback
-            input_data[col] = st.text_input(f"{col}")
+            input_data[col] = st.date_input(
+                f"{col}",
+                help=f"Select a date in YYYY-MM-DD format for {col}."
+            )
+        else:  # Fallback for unsupported data types
+            input_data[col] = st.text_input(
+                f"{col} (Unsupported type)",
+                help=f"Enter a value for {col}. This field has an unsupported data type."
+            )
 
     # ---- Prediction Logic ----
     if st.button("Predict Outcome"):
         try:
+            # Validate inputs
+            for key, value in input_data.items():
+                if isinstance(value, str) and (value == "" or value == "Select"):
+                    st.error(f"Please provide a valid input for {key}.")
+                    return
+
             # Convert user input to DataFrame
             input_df = pd.DataFrame([input_data])
-
+            st.write("Your Input:", input_df)
             # Preprocess the input data
+            # Assuming prepare_data is defined elsewhere
             scaled_input, final_input, outlier = prepare_data(input_df)
-
-            if outlier is None:
+           
+            if len(outlier) == 0:
+                st.write("Data for Prediction (after transformation):", final_input.head())
                 # Find the nearest cluster in the dataset
+                # Assuming all_perspectives is defined elsewhere
                 X_clusters = df_w_clusters[all_perspectives]
                 y_clusters = df_w_clusters['final_labels']
 
                 # Measure distance and predict
-                cluster_distances = ((X_clusters - final_input.values) ** 2).sum(axis=1)
+                cluster_distances = ((X_clusters - final_input[all_perspectives].values) ** 2).sum(axis=1)
                 closest_cluster = y_clusters.loc[cluster_distances.idxmin()]
                 st.success(f"The record belongs to Cluster: {closest_cluster}")
             else:
                 # Handle outlier by reclassification
                 st.warning("Your record is an outlier. Reclassification using Decision Tree in progress...")
-
+                st.write("Data for Prediction (after transformation):", outlier[all_perspectives].head())
                 # Prepare data for decision tree
                 all_features = df_w_clusters[all_perspectives]
                 all_labels = df_w_clusters['final_labels']
@@ -449,12 +527,14 @@ def main():
                     all_features, all_labels, test_size=0.3, random_state=5
                 )
 
-                # Train decision tree
+                # Train decision tree - Decision trees and ensemble methods do not require 
+                # feature scaling to be performed as they are not sensitive to the the variance in the data.
+                # https://towardsdatascience.com/do-decision-trees-need-feature-scaling-97809eaa60c6
                 dt = DecisionTreeClassifier(random_state=5, max_depth=3)
                 dt.fit(X_train, y_train)
 
                 # Predict outlier cluster
-                outlier['final_labels'] = dt.predict(outlier)
+                outlier['final_labels'] = dt.predict(outlier[all_perspectives])
                 st.success(f"The record was reclassified to Cluster: {outlier['final_labels'][0]}")
 
                 # Show model performance
@@ -465,5 +545,4 @@ def main():
             st.error(f"Error during prediction: {e}")
 
 # ---- Run Application ----
-if __name__ == "__main__":
-    main()
+main()

@@ -3,7 +3,7 @@ import pandas as pd
 import os  # For checking file existence
 
 # Título da página
-st.title("Your Suggestions")
+st.title("📋 Your Suggestions")
 
 # Selecionar nome
 name = st.selectbox("Select your name:", ["", "Alice", "Bob", "Charlie", "Dana", "Eve"])

@@ -18,7 +18,7 @@ cluster_analysis_page = st.Page(
 
 cluster_prediction_page = st.Page(
     page="views/cluster_prediction.py",
-    title="Clusters Prediction",
+    title="Cluster Prediction",
     icon="🤖",
 )
 
@@ -38,6 +38,6 @@ pg = st.navigation(
 )
 #-- on all pages ----
 st.logo("assets/logo.png", size="large")
-st.sidebar.text("Made by Cataina Nunes for Data Mining Course 24/25 NOVA IMS")
+st.sidebar.text("Developed by Catarina Nunes for the Data Mining Course (24/25) at NOVA IMS.")
 
 pg.run()
